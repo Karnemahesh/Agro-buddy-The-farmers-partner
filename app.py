@@ -14,23 +14,23 @@ from utils.fertilizer import fertilizer_dic
 from utils.model import ResNet9
 
 # =========================================================
-# Base Directory (important for Render/Linux)
+# Base Directory (Render/Linux Safe)
 # =========================================================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # =========================================================
-# Load CSV (only once)
+# Load CSV (only once at startup)
 # =========================================================
 
 fertilizer_path = os.path.join(BASE_DIR, "data", "fertilizer.csv")
 df = pd.read_csv(fertilizer_path)
 
 # =========================================================
-# Load Models (only once)
+# Load Models (only once at startup)
 # =========================================================
 
-# ---- Disease Model ----
+# -------- Disease Model --------
 disease_classes = [
     'Apple___Apple_scab','Apple___Black_rot','Apple___Cedar_apple_rust','Apple___healthy',
     'Blueberry___healthy','Cherry_(including_sour)___Powdery_mildew','Cherry_(including_sour)___healthy',
@@ -49,10 +49,10 @@ disease_classes = [
 
 disease_model_path = os.path.join(BASE_DIR, "models", "plant_disease_model.pth")
 disease_model = ResNet9(3, len(disease_classes))
-disease_model.load_state_dict(torch.load(disease_model_path, map_location=torch.device("cpu")))
+disease_model.load_state_dict(torch.load(disease_model_path, map_location="cpu"))
 disease_model.eval()
 
-# ---- Crop Model ----
+# -------- Crop Model --------
 crop_model_path = os.path.join(BASE_DIR, "models", "RandomForest.pkl")
 crop_recommendation_model = pickle.load(open(crop_model_path, "rb"))
 
@@ -66,7 +66,7 @@ def weather_fetch(city_name):
         return None
 
     url = f"http://api.openweathermap.org/data/2.5/weather?appid={api_key}&q={city_name}"
-    response = requests.get(url)
+    response = requests.get(url, timeout=5)
     data = response.json()
 
     if data.get("cod") != "404":
@@ -83,11 +83,12 @@ def predict_image(img):
         transforms.ToTensor(),
     ])
 
-    image = Image.open(io.BytesIO(img))
+    image = Image.open(io.BytesIO(img)).convert("RGB")
     img_tensor = transform(image).unsqueeze(0)
 
-    outputs = disease_model(img_tensor)
-    _, preds = torch.max(outputs, dim=1)
+    with torch.no_grad():
+        outputs = disease_model(img_tensor)
+        _, preds = torch.max(outputs, dim=1)
 
     return disease_classes[preds[0].item()]
 
@@ -97,19 +98,25 @@ def predict_image(img):
 
 app = Flask(__name__)
 
+# -------- Pages --------
+
 @app.route('/')
 def home():
     return render_template("index.html", title="AgroBuddy - Home")
+
 
 @app.route('/crop-recommend')
 def crop_recommend():
     return render_template("crop.html", title="Crop Recommendation")
 
+
+# IMPORTANT: function name matches template url_for('fertilizer_recommendation')
 @app.route('/fertilizer')
-def fertilizer_page():
+def fertilizer_recommendation():
     return render_template("fertilizer.html", title="Fertilizer Suggestion")
 
-# ---------------- Crop Prediction ----------------
+
+# -------- Crop Prediction --------
 
 @app.route('/crop-predict', methods=['POST'])
 def crop_prediction():
@@ -133,7 +140,8 @@ def crop_prediction():
     except Exception:
         return render_template("try_again.html")
 
-# ---------------- Fertilizer Prediction ----------------
+
+# -------- Fertilizer Prediction --------
 
 @app.route('/fertilizer-predict', methods=['POST'])
 def fertilizer_prediction():
@@ -163,7 +171,8 @@ def fertilizer_prediction():
     except Exception:
         return render_template("fertilizer.html")
 
-# ---------------- Disease Prediction ----------------
+
+# -------- Disease Prediction --------
 
 @app.route('/disease-predict', methods=['GET', 'POST'])
 def disease_prediction():
@@ -183,6 +192,7 @@ def disease_prediction():
             return render_template("disease.html")
 
     return render_template("disease.html")
+
 
 # =========================================================
 
