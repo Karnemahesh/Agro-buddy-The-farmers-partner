@@ -18,6 +18,7 @@ from utils.model import ResNet9
 # =========================================================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+df = pd.read_csv(os.path.join(BASE_DIR, 'data', 'fertilizer.csv'))
 
 # =========================================================
 # Load Models Safely
@@ -177,3 +178,4 @@ def disease_prediction():
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
