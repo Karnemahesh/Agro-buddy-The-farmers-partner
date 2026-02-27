@@ -143,34 +143,46 @@ def crop_prediction():
 
 # -------- Fertilizer Prediction --------
 
-@app.route('/fertilizer-predict', methods=['POST'])
-def fertilizer_recommend():
-    try:
-        crop_name = request.form['cropname']
-        N = int(request.form['nitrogen'])
-        P = int(request.form['phosphorous'])
-        K = int(request.form['pottasium'])
+@ app.route('/fertilizer-predict', methods=['POST'])
+def fert_recommend():
+    title = 'AgroBuddy - Fertilizer Suggestion'
 
-        nr = df[df['Crop'] == crop_name]['N'].iloc[0]
-        pr = df[df['Crop'] == crop_name]['P'].iloc[0]
-        kr = df[df['Crop'] == crop_name]['K'].iloc[0]
+    crop_name = str(request.form['cropname'])
+    N = int(request.form['nitrogen'])
+    P = int(request.form['phosphorous'])
+    K = int(request.form['pottasium'])
+    # ph = float(request.form['ph'])
 
-        diff = {abs(nr-N): "N", abs(pr-P): "P", abs(kr-K): "K"}
-        key = diff[max(diff.keys())]
+    df = pd.read_csv('data/fertilizer.csv')
 
-        if key == "N":
-            result_key = "NHigh" if nr-N < 0 else "Nlow"
-        elif key == "P":
-            result_key = "PHigh" if pr-P < 0 else "Plow"
+    nr = df[df['Crop'] == crop_name]['N'].iloc[0]
+    pr = df[df['Crop'] == crop_name]['P'].iloc[0]
+    kr = df[df['Crop'] == crop_name]['K'].iloc[0]
+
+    n = nr - N
+    p = pr - P
+    k = kr - K
+    temp = {abs(n): "N", abs(p): "P", abs(k): "K"}
+    max_value = temp[max(temp.keys())]
+    if max_value == "N":
+        if n < 0:
+            key = 'NHigh'
         else:
-            result_key = "KHigh" if kr-K < 0 else "Klow"
+            key = "Nlow"
+    elif max_value == "P":
+        if p < 0:
+            key = 'PHigh'
+        else:
+            key = "Plow"
+    else:
+        if k < 0:
+            key = 'KHigh'
+        else:
+            key = "Klow"
 
-        recommendation = Markup(str(fertilizer_dic[result_key]))
-        return render_template("fertilizer-result.html", recommendation=recommendation)
+    response = Markup(str(fertilizer_dic[key]))
 
-    except Exception:
-        return render_template("fertilizer.html")
-
+    return render_template('fertilizer-result.html', recommendation=response, title=title)
 
 # -------- Disease Prediction --------
 
@@ -198,4 +210,5 @@ def disease_prediction():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
 
