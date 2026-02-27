@@ -144,7 +144,7 @@ def crop_prediction():
 # -------- Fertilizer Prediction --------
 
 @app.route('/fertilizer-predict', methods=['POST'])
-def fertilizer_prediction():
+def fertilizer_recommend():
     try:
         crop_name = request.form['cropname']
         N = int(request.form['nitrogen'])
@@ -198,3 +198,4 @@ def disease_prediction():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
