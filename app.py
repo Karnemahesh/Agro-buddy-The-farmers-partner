@@ -14,17 +14,23 @@ from utils.fertilizer import fertilizer_dic
 from utils.model import ResNet9
 
 # =========================================================
-# Helper: Base Directory (important for deployment)
+# Base Directory (important for Render/Linux)
 # =========================================================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-df = pd.read_csv(os.path.join(BASE_DIR, 'data', 'fertilizer.csv'))
 
 # =========================================================
-# Load Models Safely
+# Load CSV (only once)
 # =========================================================
 
-# -------- Disease Model --------
+fertilizer_path = os.path.join(BASE_DIR, "data", "fertilizer.csv")
+df = pd.read_csv(fertilizer_path)
+
+# =========================================================
+# Load Models (only once)
+# =========================================================
+
+# ---- Disease Model ----
 disease_classes = [
     'Apple___Apple_scab','Apple___Black_rot','Apple___Cedar_apple_rust','Apple___healthy',
     'Blueberry___healthy','Cherry_(including_sour)___Powdery_mildew','Cherry_(including_sour)___healthy',
@@ -41,53 +47,48 @@ disease_classes = [
     'Tomato___Tomato_Yellow_Leaf_Curl_Virus','Tomato___Tomato_mosaic_virus','Tomato___healthy'
 ]
 
-disease_model_path = os.path.join(BASE_DIR, "models/plant_disease_model.pth")
+disease_model_path = os.path.join(BASE_DIR, "models", "plant_disease_model.pth")
 disease_model = ResNet9(3, len(disease_classes))
-disease_model.load_state_dict(torch.load(disease_model_path, map_location=torch.device('cpu')))
+disease_model.load_state_dict(torch.load(disease_model_path, map_location=torch.device("cpu")))
 disease_model.eval()
 
-# -------- Crop Model --------
-crop_model_path = os.path.join(BASE_DIR, "models/RandomForest.pkl")
+# ---- Crop Model ----
+crop_model_path = os.path.join(BASE_DIR, "models", "RandomForest.pkl")
 crop_recommendation_model = pickle.load(open(crop_model_path, "rb"))
 
 # =========================================================
-# Weather Fetch Function (Using Environment Variable)
+# Helper Functions
 # =========================================================
 
 def weather_fetch(city_name):
     api_key = os.environ.get("WEATHER_API_KEY")
-
     if not api_key:
         return None
 
-    base_url = "http://api.openweathermap.org/data/2.5/weather?"
-    complete_url = f"{base_url}appid={api_key}&q={city_name}"
-
-    response = requests.get(complete_url)
+    url = f"http://api.openweathermap.org/data/2.5/weather?appid={api_key}&q={city_name}"
+    response = requests.get(url)
     data = response.json()
 
     if data.get("cod") != "404":
-        main = data["main"]
-        temperature = round(main["temp"] - 273.15, 2)
-        humidity = main["humidity"]
-        return temperature, humidity
+        temp = round(data["main"]["temp"] - 273.15, 2)
+        humidity = data["main"]["humidity"]
+        return temp, humidity
+
     return None
 
-# =========================================================
-# Image Prediction
-# =========================================================
 
-def predict_image(img, model=disease_model):
+def predict_image(img):
     transform = transforms.Compose([
-        transforms.Resize(256),
+        transforms.Resize((128, 128)),
         transforms.ToTensor(),
     ])
-    image = Image.open(io.BytesIO(img))
-    img_tensor = transform(image)
-    img_tensor = torch.unsqueeze(img_tensor, 0)
 
-    outputs = model(img_tensor)
+    image = Image.open(io.BytesIO(img))
+    img_tensor = transform(image).unsqueeze(0)
+
+    outputs = disease_model(img_tensor)
     _, preds = torch.max(outputs, dim=1)
+
     return disease_classes[preds[0].item()]
 
 # =========================================================
@@ -98,84 +99,92 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return render_template('index.html', title="AgroBuddy - Home")
+    return render_template("index.html", title="AgroBuddy - Home")
 
 @app.route('/crop-recommend')
 def crop_recommend():
-    return render_template('crop.html', title="Crop Recommendation")
+    return render_template("crop.html", title="Crop Recommendation")
 
 @app.route('/fertilizer')
-def fertilizer_recommendation():
-    return render_template('fertilizer.html', title="Fertilizer Suggestion")
+def fertilizer_page():
+    return render_template("fertilizer.html", title="Fertilizer Suggestion")
 
 # ---------------- Crop Prediction ----------------
 
 @app.route('/crop-predict', methods=['POST'])
 def crop_prediction():
-    N = int(request.form['nitrogen'])
-    P = int(request.form['phosphorous'])
-    K = int(request.form['pottasium'])
-    ph = float(request.form['ph'])
-    rainfall = float(request.form['rainfall'])
-    city = request.form.get("city")
+    try:
+        N = int(request.form['nitrogen'])
+        P = int(request.form['phosphorous'])
+        K = int(request.form['pottasium'])
+        ph = float(request.form['ph'])
+        rainfall = float(request.form['rainfall'])
+        city = request.form.get("city")
 
-    weather = weather_fetch(city)
+        weather = weather_fetch(city)
+        if weather:
+            temp, humidity = weather
+            data = np.array([[N, P, K, temp, humidity, ph, rainfall]])
+            prediction = crop_recommendation_model.predict(data)[0]
+            return render_template("crop-result.html", prediction=prediction)
 
-    if weather:
-        temperature, humidity = weather
-        data = np.array([[N, P, K, temperature, humidity, ph, rainfall]])
-        prediction = crop_recommendation_model.predict(data)[0]
-        return render_template('crop-result.html', prediction=prediction, title="Crop Recommendation")
+        return render_template("try_again.html")
 
-    return render_template('try_again.html', title="Try Again")
+    except Exception:
+        return render_template("try_again.html")
 
 # ---------------- Fertilizer Prediction ----------------
 
 @app.route('/fertilizer-predict', methods=['POST'])
-def fert_recommend():
-    crop_name = request.form['cropname']
-    N = int(request.form['nitrogen'])
-    P = int(request.form['phosphorous'])
-    K = int(request.form['pottasium'])
+def fertilizer_prediction():
+    try:
+        crop_name = request.form['cropname']
+        N = int(request.form['nitrogen'])
+        P = int(request.form['phosphorous'])
+        K = int(request.form['pottasium'])
 
-    df = pd.read_csv(os.path.join(BASE_DIR, 'Data/fertilizer.csv'))
+        nr = df[df['Crop'] == crop_name]['N'].iloc[0]
+        pr = df[df['Crop'] == crop_name]['P'].iloc[0]
+        kr = df[df['Crop'] == crop_name]['K'].iloc[0]
 
-    nr = df[df['Crop'] == crop_name]['N'].iloc[0]
-    pr = df[df['Crop'] == crop_name]['P'].iloc[0]
-    kr = df[df['Crop'] == crop_name]['K'].iloc[0]
+        diff = {abs(nr-N): "N", abs(pr-P): "P", abs(kr-K): "K"}
+        key = diff[max(diff.keys())]
 
-    diff = {abs(nr-N): "N", abs(pr-P): "P", abs(kr-K): "K"}
-    key = diff[max(diff.keys())]
+        if key == "N":
+            result_key = "NHigh" if nr-N < 0 else "Nlow"
+        elif key == "P":
+            result_key = "PHigh" if pr-P < 0 else "Plow"
+        else:
+            result_key = "KHigh" if kr-K < 0 else "Klow"
 
-    if key == "N":
-        result_key = "NHigh" if nr-N < 0 else "Nlow"
-    elif key == "P":
-        result_key = "PHigh" if pr-P < 0 else "Plow"
-    else:
-        result_key = "KHigh" if kr-K < 0 else "Klow"
+        recommendation = Markup(str(fertilizer_dic[result_key]))
+        return render_template("fertilizer-result.html", recommendation=recommendation)
 
-    response = Markup(str(fertilizer_dic[result_key]))
-    return render_template('fertilizer-result.html', recommendation=response, title="Fertilizer Suggestion")
+    except Exception:
+        return render_template("fertilizer.html")
 
 # ---------------- Disease Prediction ----------------
 
 @app.route('/disease-predict', methods=['GET', 'POST'])
 def disease_prediction():
     if request.method == 'POST':
-        file = request.files.get('file')
-        if not file:
-            return redirect(request.url)
+        try:
+            file = request.files.get('file')
+            if not file:
+                return redirect(request.url)
 
-        img = file.read()
-        prediction = predict_image(img)
-        result = Markup(str(disease_dic[prediction]))
+            img = file.read()
+            prediction = predict_image(img)
+            result = Markup(str(disease_dic[prediction]))
 
-        return render_template('disease-result.html', prediction=result, title="Disease Detection")
+            return render_template("disease-result.html", prediction=result)
 
-    return render_template('disease.html', title="Disease Detection")
+        except Exception:
+            return render_template("disease.html")
+
+    return render_template("disease.html")
 
 # =========================================================
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
